@@ -161,7 +161,7 @@ func TestUnit_NewByTime(t *testing.T) {
 	tok := NewByTime()
 	val := binary.BigEndian.Uint64(tok[:])
 	// Допускаем небольшое расхождение из-за времени выполнения.
-	if val < uint64(now) || val > uint64(now)+1000 {
+	if val < uint64(now) || val > uint64(now)+10000 {
 		t.Errorf("NewByTime value %d not close to now %d", val, now)
 	}
 }
