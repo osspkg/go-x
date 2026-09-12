@@ -8,7 +8,7 @@
 package sorts
 
 func Merge[T any](list []T, less func(i, j int) bool) {
-	tmp := make([]T, 0, len(list)/2+1)
+	tmp := make([]T, 0, len(list))
 	mergeSplitSortJoin[T](list, tmp, 0, len(list)-1, less)
 }
 

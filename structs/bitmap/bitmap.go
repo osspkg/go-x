@@ -6,6 +6,7 @@
 package bitmap
 
 import (
+	"fmt"
 	"sync"
 )
 
@@ -51,22 +52,11 @@ func New(opts ...Option) *Bitmap {
 }
 
 func (b *Bitmap) resize(index uint64) {
-	size := index / blockSize
-	if index-(size%blockSize) > 0 {
-		size++
-	}
+	size := index/blockSize + 1
 
 	b.bits = append(b.bits, make([]byte, size-b.blocks)...)
 	b.blocks = uint64(len(b.bits))
 	b.max = b.blocks*blockSize - 1
-}
-
-func (b *Bitmap) getBlock(index uint64) uint64 {
-	return index / blockSize
-}
-
-func (b *Bitmap) getBit(index uint64) byte {
-	return 1 << (index - b.getBlock(index)*blockSize)
 }
 
 func (b *Bitmap) Set(index uint64) {
@@ -74,16 +64,20 @@ func (b *Bitmap) Set(index uint64) {
 		return
 	}
 
-	if !b.lockoff {
-		b.mux.Lock()
-		defer b.mux.Unlock()
+	if b.lockoff {
+		if index > b.max {
+			b.resize(index)
+		}
+		b.bits[index/blockSize] |= 1 << (index % blockSize)
+		return
 	}
 
+	b.mux.Lock()
 	if index > b.max {
 		b.resize(index)
 	}
-
-	b.bits[b.getBlock(index)] |= b.getBit(index)
+	b.bits[index/blockSize] |= 1 << (index % blockSize)
+	b.mux.Unlock()
 }
 
 func (b *Bitmap) Del(index uint64) {
@@ -91,12 +85,14 @@ func (b *Bitmap) Del(index uint64) {
 		return
 	}
 
-	if !b.lockoff {
-		b.mux.Lock()
-		defer b.mux.Unlock()
+	if b.lockoff {
+		b.bits[index/blockSize] &^= 1 << (index % blockSize)
+		return
 	}
 
-	b.bits[b.getBlock(index)] &^= b.getBit(index)
+	b.mux.Lock()
+	b.bits[index/blockSize] &^= 1 << (index % blockSize)
+	b.mux.Unlock()
 }
 
 func (b *Bitmap) Has(index uint64) bool {
@@ -104,12 +100,14 @@ func (b *Bitmap) Has(index uint64) bool {
 		return false
 	}
 
-	if !b.lockoff {
-		b.mux.RLock()
-		defer b.mux.RUnlock()
+	if b.lockoff {
+		return (b.bits[index/blockSize] & (1 << (index % blockSize))) > 0
 	}
 
-	return (b.bits[b.getBlock(index)] & b.getBit(index)) > 0
+	b.mux.RLock()
+	result := (b.bits[index/blockSize] & (1 << (index % blockSize))) > 0
+	b.mux.RUnlock()
+	return result
 }
 
 func (b *Bitmap) MarshalBinary() ([]byte, error) {
@@ -125,6 +123,14 @@ func (b *Bitmap) MarshalBinary() ([]byte, error) {
 }
 
 func (b *Bitmap) UnmarshalBinary(in []byte) error {
+	maxBlocks := MaxIndex/blockSize + 1
+	if len(in) == 0 {
+		return fmt.Errorf("bitmap cannot be empty")
+	}
+	if uint64(len(in)) > maxBlocks {
+		return fmt.Errorf("bitmap is too large")
+	}
+
 	if !b.lockoff {
 		b.mux.Lock()
 		defer b.mux.Unlock()
@@ -134,24 +140,34 @@ func (b *Bitmap) UnmarshalBinary(in []byte) error {
 	copy(b.bits, in)
 
 	b.blocks = uint64(len(in))
-	b.max = b.blocks * blockSize
+	b.max = b.blocks*blockSize - 1
 
 	return nil
 }
 
 func (b *Bitmap) CopyTo(dst *Bitmap) {
+	if b == dst {
+		return
+	}
+
 	if !b.lockoff {
 		b.mux.Lock()
-		defer b.mux.Unlock()
 	}
+
+	bits := make([]byte, len(b.bits))
+	copy(bits, b.bits)
+	blocks, max, lockoff := b.blocks, b.max, b.lockoff
+
+	if !b.lockoff {
+		b.mux.Unlock()
+	}
+
 	if !dst.lockoff {
 		dst.mux.Lock()
 		defer dst.mux.Unlock()
 	}
-
-	dst.bits = make([]byte, len(b.bits))
-	copy(dst.bits, b.bits)
-	dst.blocks = b.blocks
-	dst.max = b.max
-	dst.lockoff = b.lockoff
+	dst.bits = bits
+	dst.blocks = blocks
+	dst.max = max
+	dst.lockoff = lockoff
 }

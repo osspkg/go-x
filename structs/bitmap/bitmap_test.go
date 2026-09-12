@@ -70,6 +70,25 @@ func TestUnit_Bitmap_Marshaling(t *testing.T) {
 
 }
 
+func TestUnit_Bitmap_UnmarshalBounds(t *testing.T) {
+	bm := New()
+	if err := bm.UnmarshalBinary([]byte{0}); err != nil {
+		t.Fatal(err)
+	}
+
+	bm.Set(7)
+	if !bm.Has(7) {
+		t.Fatal("bit 7 should be set")
+	}
+	if bm.Has(8) {
+		t.Fatal("bit 8 must be outside a one-byte bitmap")
+	}
+	bm.Set(8)
+	if !bm.Has(8) {
+		t.Fatal("bit 8 should resize the bitmap")
+	}
+}
+
 /*
 goos: linux
 goarch: amd64

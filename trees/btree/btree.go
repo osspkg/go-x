@@ -51,7 +51,6 @@ func New[K cmp.Ordered, V any](degree int) *BTree[K, V] {
 
 func (t *BTree[K, V]) Find(key K) (V, bool) {
 	t.mu.RLock()
-	defer t.mu.RUnlock()
 
 	curr := t.root
 	for curr != nil {
@@ -61,7 +60,9 @@ func (t *BTree[K, V]) Find(key K) (V, bool) {
 		}
 
 		if i < curr.numKeys && key == curr.keys[i] {
-			return curr.values[i], true
+			value := curr.values[i]
+			t.mu.RUnlock()
+			return value, true
 		}
 
 		if curr.isLeaf {
@@ -71,6 +72,7 @@ func (t *BTree[K, V]) Find(key K) (V, bool) {
 	}
 
 	var zero V
+	t.mu.RUnlock()
 	return zero, false
 }
 
@@ -201,6 +203,9 @@ func (t *BTree[K, V]) deleteFromNode(x *node[K, V], key K) {
 				x.values[i] = x.values[i+1]
 			}
 			x.numKeys--
+			var zeroK K
+			var zeroV V
+			x.keys[x.numKeys], x.values[x.numKeys] = zeroK, zeroV
 		} else {
 			t.deleteFromInternalNode(x, idx)
 		}
@@ -298,6 +303,12 @@ func (t *BTree[K, V]) borrowFromPrev(x *node[K, V], idx int) {
 
 	child.numKeys++
 	sibling.numKeys--
+	var zeroK K
+	var zeroV V
+	sibling.keys[sibling.numKeys], sibling.values[sibling.numKeys] = zeroK, zeroV
+	if !sibling.isLeaf {
+		sibling.children[sibling.numKeys+1] = nil
+	}
 }
 
 func (t *BTree[K, V]) borrowFromNext(x *node[K, V], idx int) {
@@ -327,6 +338,12 @@ func (t *BTree[K, V]) borrowFromNext(x *node[K, V], idx int) {
 
 	child.numKeys++
 	sibling.numKeys--
+	var zeroK K
+	var zeroV V
+	sibling.keys[sibling.numKeys], sibling.values[sibling.numKeys] = zeroK, zeroV
+	if !sibling.isLeaf {
+		sibling.children[sibling.numKeys+1] = nil
+	}
 }
 
 func (t *BTree[K, V]) merge(x *node[K, V], idx int) {
@@ -357,4 +374,8 @@ func (t *BTree[K, V]) merge(x *node[K, V], idx int) {
 
 	child.numKeys += sibling.numKeys + 1
 	x.numKeys--
+	var zeroK K
+	var zeroV V
+	x.keys[x.numKeys], x.values[x.numKeys] = zeroK, zeroV
+	x.children[x.numKeys+1] = nil
 }

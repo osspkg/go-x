@@ -17,6 +17,11 @@ var (
 	ErrNodeKeyExist  = errors.New("node key exist")
 )
 
+const (
+	stateVisiting uint8 = 1
+	stateDone     uint8 = 2
+)
+
 type Graph[K comparable] struct {
 	mu        sync.RWMutex
 	nodes     map[K]struct{}
@@ -65,19 +70,19 @@ func (g *Graph[K]) TopologicalSort() ([]K, error) {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
 
-	visited := make(map[K]bool)
+	visited := make(map[K]uint8, len(g.nodes))
 	order := make([]K, 0, len(g.nodes))
 
 	var dfs func(node K) error
 	dfs = func(node K) error {
-		if inProcess, exists := visited[node]; exists {
-			if inProcess {
-				return ErrCycleDetected
-			}
+		switch visited[node] {
+		case stateVisiting:
+			return ErrCycleDetected
+		case stateDone:
 			return nil
 		}
 
-		visited[node] = true
+		visited[node] = stateVisiting
 
 		for neighbor := range g.adjacency[node] {
 			if err := dfs(neighbor); err != nil {
@@ -85,7 +90,7 @@ func (g *Graph[K]) TopologicalSort() ([]K, error) {
 			}
 		}
 
-		visited[node] = false
+		visited[node] = stateDone
 		order = append(order, node)
 
 		return nil

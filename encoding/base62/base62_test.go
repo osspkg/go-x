@@ -50,6 +50,16 @@ func TestEncode_EncodeDecode(t *testing.T) {
 	}
 }
 
+func TestDecode_InvalidInput(t *testing.T) {
+	v := New("0123456789QAZWSXEDCRFVTGBYHNUJMIKOLPqazwsxedcrfvtgbyhnujmikolp")
+	if got := v.Decode("!"); got != 0 {
+		t.Fatalf("invalid input decoded to %d", got)
+	}
+	if got := v.Decode("VVVVVVVVVVVVVVVVVVVV"); got != 0 {
+		t.Fatalf("overflowing input decoded to %d", got)
+	}
+}
+
 func TestCheckAll(t *testing.T) {
 	v := New("0123456789QAZWSXEDCRFVTGBYHNUJMIKOLPqazwsxedcrfvtgbyhnujmikolp")
 

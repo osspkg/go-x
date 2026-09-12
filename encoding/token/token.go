@@ -9,7 +9,6 @@ import (
 	"crypto/md5"
 	crand "crypto/rand"
 	"encoding/binary"
-	"math/rand/v2"
 	"time"
 )
 
@@ -18,6 +17,9 @@ type T64 [8]byte
 var Nil T64
 
 func (t T64) String() string {
+	tableMu.RLock()
+	defer tableMu.RUnlock()
+
 	var dst [18]byte
 	dlt := len(table)
 	j := 0
@@ -43,6 +45,9 @@ func (t T64) Uint64() uint64 {
 }
 
 func ParseBytes(s []byte) (T64, bool) {
+	tableMu.RLock()
+	defer tableMu.RUnlock()
+
 	n := len(s)
 	if n != 18 || s[6] != '-' || s[11] != '-' {
 		return Nil, false
@@ -64,7 +69,7 @@ func ParseBytes(s []byte) (T64, bool) {
 		if a == -1 || b == -1 {
 			return Nil, false
 		}
-		t[j] = byte(reverseTable[s[i]]*dlt + reverseTable[s[i+1]])
+		t[j] = byte(a*dlt + b)
 		j++
 	}
 
@@ -72,7 +77,31 @@ func ParseBytes(s []byte) (T64, bool) {
 }
 
 func Parse(s string) (T64, bool) {
-	return ParseBytes([]byte(s))
+	tableMu.RLock()
+	defer tableMu.RUnlock()
+
+	if len(s) != 18 || s[6] != '-' || s[11] != '-' {
+		return Nil, false
+	}
+
+	dlt := len(table)
+	var t T64
+	j := 0
+	for i := 0; i < len(s); i += 2 {
+		if i == 6 || i == 11 {
+			i--
+			continue
+		}
+		a := reverseTable[s[i]]
+		b := reverseTable[s[i+1]]
+		if a == -1 || b == -1 {
+			return Nil, false
+		}
+		t[j] = byte(a*dlt + b)
+		j++
+	}
+
+	return t, true
 }
 
 func NewByTime() (t T64) {
@@ -93,9 +122,8 @@ func NewByUint(v uint64) (t T64) {
 }
 
 func NewByBytes(b []byte) (t T64) {
-	h := md5.New() //nolint:gosec
-	h.Write(b)
-	copy(t[:], h.Sum(nil))
+	sum := md5.Sum(b) //nolint:gosec
+	copy(t[:], sum[:])
 	return
 }
 
@@ -109,22 +137,6 @@ func NewRandom() (t T64) {
 			continue
 		}
 		return
-	}
-
-	rnd := poolRnd.Get().(*rand.Rand)
-	defer poolRnd.Put(rnd)
-
-	dgst := poolDigest.Get().(*digest)
-	defer poolDigest.Put(dgst)
-
-	rnd.Shuffle(len(dgst.D), func(i, j int) {
-		dgst.D[i], dgst.D[j] = dgst.D[j], dgst.D[i]
-	})
-
-	ld, lt := len(dgst.D), len(t)
-
-	for i := 0; i < lt; i++ {
-		t[i] = dgst.D[rnd.IntN(ld)]
 	}
 
 	return

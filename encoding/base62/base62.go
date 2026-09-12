@@ -6,16 +6,14 @@
 package base62
 
 import (
-	"bytes"
-
-	"go.osspkg.com/algorithms/sorts"
+	"math"
 )
 
 const size = 62
 
 type Base62 struct {
 	enc []byte
-	dec map[byte]uint64
+	dec [256]byte
 }
 
 func New(alphabet string) *Base62 {
@@ -24,28 +22,38 @@ func New(alphabet string) *Base62 {
 	}
 	v := &Base62{
 		enc: []byte(alphabet),
-		dec: make(map[byte]uint64, size),
+	}
+	for i := range v.dec {
+		v.dec[i] = 0xff
 	}
 	for i, b := range v.enc {
-		v.dec[b] = uint64(i)
+		if v.dec[b] != 0xff {
+			panic("encoding alphabet contains duplicate bytes")
+		}
+		v.dec[b] = byte(i)
 	}
 	return v
 }
 
 func (v *Base62) Encode(id uint64) string {
-	result := make([]byte, 0, 11)
+	var result [11]byte
+	i := len(result)
 	for id > 0 {
-		result = append(result, v.enc[id%size])
+		i--
+		result[i] = v.enc[id%size]
 		id /= size
 	}
-	sorts.Reverse(result)
-	return string(result)
+	return string(result[i:])
 }
 
 func (v *Base62) Decode(data string) uint64 {
 	var id uint64
-	for _, r := range data {
-		id = id*size + uint64(bytes.IndexRune(v.enc, r))
+	for i := 0; i < len(data); i++ {
+		value := v.dec[data[i]]
+		if value == 0xff || id > (math.MaxUint64-uint64(value))/size {
+			return 0
+		}
+		id = id*size + uint64(value)
 	}
 	return id
 }

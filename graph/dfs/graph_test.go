@@ -35,3 +35,27 @@ func TestUnit_DAG(t *testing.T) {
 	_, err = dag.TopologicalSort()
 	casecheck.Error(t, err)
 }
+
+func BenchmarkTopologicalSort(b *testing.B) {
+	const nodes = 1_000
+
+	dag := NewGraph[int]()
+	for i := 0; i < nodes; i++ {
+		if err := dag.AddNode(i); err != nil {
+			b.Fatal(err)
+		}
+		if i > 0 {
+			if err := dag.AddEdge(i-1, i); err != nil {
+				b.Fatal(err)
+			}
+		}
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := dag.TopologicalSort(); err != nil {
+			b.Fatal(err)
+		}
+	}
+}

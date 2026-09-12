@@ -37,6 +37,11 @@ import (
 
 const saltSize = 8
 
+const (
+	maxRestoreBytes = 64 << 20
+	maxRestoreSalts = 1 << 20
+)
+
 type Bloom struct {
 	bits  *bitmap.Bitmap
 	size  uint64
@@ -100,20 +105,24 @@ func New(opts ...Option) (*Bloom, error) {
 }
 
 func (b *Bloom) CopyTo(dst *Bloom) {
-	b.mux.Lock()
-	defer b.mux.Unlock()
+	if b == dst {
+		return
+	}
+
+	b.mux.RLock()
+	bits := bitmap.New(bitmap.OptDisableLock())
+	b.bits.CopyTo(bits)
+	size, optSize, optRate := b.size, b.optSize, b.optRate
+	salts := append([][saltSize]byte(nil), b.salts...)
+	b.mux.RUnlock()
 
 	dst.mux.Lock()
 	defer dst.mux.Unlock()
-
-	b.bits.CopyTo(dst.bits)
-	dst.size = b.size
-
-	dst.salts = make([][saltSize]byte, len(b.salts))
-	copy(dst.salts, b.salts)
-
-	dst.optSize = b.optSize
-	dst.optRate = b.optRate
+	dst.bits = bits
+	dst.size = size
+	dst.salts = salts
+	dst.optSize = optSize
+	dst.optRate = optRate
 }
 
 func (b *Bloom) Dump(w io.Writer) error {
@@ -154,7 +163,7 @@ func (b *Bloom) Restore(r io.Reader) error {
 	b.mux.Lock()
 	defer b.mux.Unlock()
 
-	reader := bufio.NewReader(r)
+	reader := bufio.NewReader(io.LimitReader(r, maxRestoreBytes+1))
 
 	head, err := reader.ReadBytes('\n')
 	if err != nil {
@@ -174,11 +183,11 @@ func (b *Bloom) Restore(r io.Reader) error {
 		return fmt.Errorf("invalid countSalt: %w", err)
 	}
 
-	if count <= 0 {
-		return fmt.Errorf("invalid countSalt: got negative value")
+	if count <= 0 || count > maxRestoreSalts {
+		return fmt.Errorf("invalid countSalt")
 	}
 
-	b.salts = make([][saltSize]byte, count)
+	salts := make([][saltSize]byte, count)
 
 	for i := 0; i < count; i++ {
 		salt, err0 := reader.ReadBytes('\n')
@@ -191,15 +200,27 @@ func (b *Bloom) Restore(r io.Reader) error {
 			return fmt.Errorf("invalid salt[%d], want 64 got %d", i, len(salt))
 		}
 
-		b.salts[i] = [saltSize]byte(salt)
+		salts[i] = [saltSize]byte(salt)
 	}
 
 	bm, err := io.ReadAll(reader)
 	if err != nil {
 		return fmt.Errorf("read bitmap: %w", err)
 	}
+	if len(bm) == 0 || len(bm) > maxRestoreBytes {
+		return fmt.Errorf("invalid bitmap size")
+	}
+	if uint64(len(bm)) > bitmap.MaxIndex/8+1 {
+		return fmt.Errorf("bitmap is too large")
+	}
 
-	return b.bits.UnmarshalBinary(bm)
+	bits := bitmap.New(bitmap.OptDisableLock())
+	if err := bits.UnmarshalBinary(bm); err != nil {
+		return fmt.Errorf("restore bitmap: %w", err)
+	}
+	b.bits = bits
+	b.salts = salts
+	return nil
 }
 
 func (b *Bloom) Add(arg any) {
@@ -215,12 +236,14 @@ func (b *Bloom) Add(arg any) {
 
 	b.mux.Lock()
 	defer b.mux.Unlock()
+	sum := make([]byte, 0, h.Size())
 
 	for i := 0; i < len(b.salts); i++ {
 		h.Reset()
 		h.Write(val)
 		h.Write(b.salts[i][:])
-		key := binary.BigEndian.Uint64(h.Sum(nil)) % b.size
+		sum = h.Sum(sum[:0])
+		key := binary.BigEndian.Uint64(sum) % b.size
 
 		b.bits.Set(key)
 	}
@@ -239,12 +262,14 @@ func (b *Bloom) Contain(arg any) bool {
 
 	b.mux.RLock()
 	defer b.mux.RUnlock()
+	sum := make([]byte, 0, h.Size())
 
 	for i := 0; i < len(b.salts); i++ {
 		h.Reset()
 		h.Write(val)
 		h.Write(b.salts[i][:])
-		key := binary.BigEndian.Uint64(h.Sum(nil)) % b.size
+		sum = h.Sum(sum[:0])
+		key := binary.BigEndian.Uint64(sum) % b.size
 
 		if !b.bits.Has(key) {
 			return false

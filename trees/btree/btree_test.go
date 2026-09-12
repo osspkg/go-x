@@ -67,7 +67,7 @@ func TestUnit_BTreeDuplicate(t *testing.T) {
 	tree.Delete(5)
 
 	// После удаления одного ключа 5 должно остаться два вхождения
-	v, found = tree.Find(5)
+	_, found = tree.Find(5)
 	if found {
 		t.Fatal("key 5 should still exist after one deletion")
 	}

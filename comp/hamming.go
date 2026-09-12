@@ -38,9 +38,11 @@ func (h *hamming[T]) Similarity(a, b []T) float64 {
 		return 1.0
 	}
 
-	dist := h.Distance(a, b)
-	if dist < 0 {
-		return 0.0
+	dist := 0
+	for i := 0; i < n; i++ {
+		if a[i] != b[i] {
+			dist++
+		}
 	}
 
 	return round(1.0 - float64(dist)/float64(n))

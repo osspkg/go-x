@@ -7,41 +7,13 @@ package token
 
 import (
 	"errors"
-	"math/rand/v2"
 	"sync"
-	"time"
 )
-
-var (
-	poolRnd = sync.Pool{New: func() any {
-		return createRand()
-	}}
-	poolDigest = sync.Pool{New: func() any {
-		return createDigest(createRand(), 128)
-	}}
-)
-
-type digest struct {
-	D []byte
-}
-
-func createRand() *rand.Rand {
-	seed2 := uint64(time.Now().UnixNano())
-	return rand.New(rand.NewPCG(seed2/100, seed2)) //nolint:gosec
-}
-
-func createDigest(rnd *rand.Rand, n int) *digest {
-	b := make([]byte, 0, n)
-	for i := 0; i < n; i++ {
-		v := rnd.IntN(255)
-		b = append(b, byte(v))
-	}
-	return &digest{D: b}
-}
 
 var (
 	table        []byte
 	reverseTable [255]int
+	tableMu      sync.RWMutex
 )
 
 func init() {
@@ -68,12 +40,17 @@ func SetTable(s string) error {
 		r[i] = -1
 	}
 	for i, b := range t {
+		if b == 0xff {
+			return errors.New("token: table cannot contain byte 0xff")
+		}
 		if _, ok := uniq[b]; ok {
 			return errors.New("token: duplicate chars in table")
 		}
 		uniq[b] = struct{}{}
 		r[b] = i
 	}
+	tableMu.Lock()
 	table, reverseTable = t, r
+	tableMu.Unlock()
 	return nil
 }

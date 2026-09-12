@@ -5,6 +5,8 @@
 
 package comp
 
+import "slices"
+
 type levenshtein[T comparable] struct {
 }
 
@@ -13,6 +15,10 @@ func NewLevenshtein[T comparable]() Comparer[T] {
 }
 
 func (l *levenshtein[T]) Distance(a, b []T) int {
+	if slices.Equal(a, b) {
+		return 0
+	}
+
 	n, m := len(a), len(b)
 
 	if n == 0 {

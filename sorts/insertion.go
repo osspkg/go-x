@@ -13,7 +13,7 @@ func Insertion[T any](list []T, less func(i, j int) bool) {
 	}
 	for el := 1; el < len(list); el++ {
 		for i := el; i > 0; i-- {
-			if less(i-1, i) {
+			if !less(i, i-1) {
 				break
 			}
 			list[i-1], list[i] = list[i], list[i-1]

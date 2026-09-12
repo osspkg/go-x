@@ -76,14 +76,26 @@ func (o *OTP) generate(secret string, counter uint64, delta int64) (string, erro
 		return "", err
 	}
 
-	counterBytes := make([]byte, 8)
-	binary.BigEndian.PutUint64(counterBytes, uint64(int64(counter)+delta))
+	if delta >= 0 {
+		if uint64(delta) > math.MaxUint64-counter {
+			return "", fmt.Errorf("counter overflow")
+		}
+		counter += uint64(delta)
+	} else {
+		decrement := uint64(-(delta + 1)) + 1
+		if decrement > counter {
+			return "", fmt.Errorf("counter underflow")
+		}
+		counter -= decrement
+	}
+
+	var counterBytes [8]byte
+	binary.BigEndian.PutUint64(counterBytes[:], counter)
 
 	hm := hmac.New(o.hash, b)
-	if _, err := hm.Write(counterBytes); err != nil {
-		return strings.Repeat("0", o.codeSize), err
-	}
-	timeHash := hm.Sum(nil)
+	_, _ = hm.Write(counterBytes[:])
+	var digest [64]byte
+	timeHash := hm.Sum(digest[:0])
 
 	offset := int(timeHash[len(timeHash)-1] & 0x0F)
 	truncHash := int64(
@@ -92,14 +104,23 @@ func (o *OTP) generate(secret string, counter uint64, delta int64) (string, erro
 			(int(timeHash[offset+2])&0xff)<<8 |
 			(int(timeHash[offset+3]) & 0xff))
 
-	otp := truncHash % int64(math.Pow10(o.codeSize))
+	modulo := int64(1_000_000)
+	if o.codeSize == 8 {
+		modulo = 100_000_000
+	}
+	otp := truncHash % modulo
 
-	return fmt.Sprintf(o.codeTmpl, otp), nil
+	var code [8]byte
+	for i := o.codeSize - 1; i >= 0; i-- {
+		code[i] = byte(otp%10) + '0'
+		otp /= 10
+	}
+	return string(code[:o.codeSize]), nil
 }
 
 func (o *OTP) GenerateTOTP(secret string, delta int64) (string, error) {
 	currentTime := time.Now().Unix()
-	counter := uint64(math.Floor(float64(currentTime) / float64(o.period)))
+	counter := uint64(currentTime / o.period)
 
 	return o.generate(secret, counter, delta)
 }
@@ -136,7 +157,7 @@ func (o *OTP) UrlHOTP(secret, account, issuer string, counter uint64) string {
 		"algorithm": []string{o.algorithm},
 		"digits":    []string{strconv.Itoa(o.codeSize)},
 		"period":    []string{strconv.Itoa(int(o.period))},
-		"counter":   []string{strconv.Itoa(int(counter))},
+		"counter":   []string{strconv.FormatUint(counter, 10)},
 	}
 
 	uri := url.URL{
